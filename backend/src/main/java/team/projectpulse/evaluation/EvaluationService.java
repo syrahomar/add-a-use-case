@@ -94,6 +94,17 @@ public class EvaluationService {
     }
 
     /**
+     * Refuses a submission, or an edit of one, whose evaluatee is deactivated: only active teammates are owed a
+     * peer evaluation (BR-submission-owed). The edit reads the evaluatee off the stored evaluation, not the
+     * payload. Evaluations already stored for her are kept and still count in reports.
+     */
+    private void requireActiveEvaluatee(Student evaluatee) {
+        if (!evaluatee.isEnabled()) {
+            throw new PeerEvaluationIllegalArgumentException(DEACTIVATED_EVALUATEE_MESSAGE);
+        }
+    }
+
+    /**
      * Refuses a submission, or an edit of one, whose week lies outside the course section's open submission window.
      *
      * <p><strong>What the window is.</strong> A peer evaluation covers the previous week and the evaluator has
@@ -111,17 +122,6 @@ public class EvaluationService {
      * @param outOfWindowMessage what to tell the caller when the week is not the previous week, which reads
      *                           differently for a first submission than for an edit
      */
-    /**
-     * Refuses a submission, or an edit of one, whose evaluatee is deactivated: only active teammates are owed a
-     * peer evaluation (BR-submission-owed). The edit reads the evaluatee off the stored evaluation, not the
-     * payload. Evaluations already stored for her are kept and still count in reports.
-     */
-    private void requireActiveEvaluatee(Student evaluatee) {
-        if (!evaluatee.isEnabled()) {
-            throw new PeerEvaluationIllegalArgumentException(DEACTIVATED_EVALUATEE_MESSAGE);
-        }
-    }
-
     private void requireOpenSubmissionWindow(Section section, String week, String outOfWindowMessage) {
         if (!section.getActiveWeeks().contains(week)) {
             throw new PeerEvaluationIllegalArgumentException("That week is not one of the course section's active weeks.");
