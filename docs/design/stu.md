@@ -26,14 +26,22 @@ classDiagram
     }
     class StudentSecurityService {
         <<reused>>
-        +isCurrentUserInstructorOrAdminOfStudentSection(studentId) boolean
+        +isCurrentUserInstructorOfStudentSection(studentId) boolean
+        +isCurrentUserCourseAdminOfStudentCourse(studentId) boolean
     }
     class StudentInstructorAuthorizationManager {
         <<reused>>
     }
+    class StudentCourseAdminAuthorizationManager {
+        <<new>>
+    }
     class SecurityConfiguration {
         <<reused>>
-        +jwtAuthenticationConverter() active-account check
+        route rule anyOf(instructor, course admin)
+    }
+    class ActiveAccountJwtAuthenticationConverter {
+        <<new>>
+        +convert(jwt) rejects inactive account
     }
     class UserRepository {
         <<reused>>
@@ -51,14 +59,17 @@ classDiagram
     StudentController --> StudentService
     StudentService --> Student
     StudentInstructorAuthorizationManager --> StudentSecurityService
+    StudentCourseAdminAuthorizationManager --> StudentSecurityService
     SecurityConfiguration --> StudentInstructorAuthorizationManager : route rule
-    SecurityConfiguration --> UserRepository : per-request lookup
+    SecurityConfiguration --> StudentCourseAdminAuthorizationManager : route rule
+    SecurityConfiguration --> ActiveAccountJwtAuthenticationConverter : bearer JWT
+    ActiveAccountJwtAuthenticationConverter --> UserRepository : per-request lookup
     EvaluationService --> Student : evaluatee.enabled
 ```
 
-Every class already exists; deactivation adds methods, a route rule, and a check, not classes.
+Deactivation adds two small classes; everything else is methods, a route rule, and a check on existing classes. `StudentCourseAdminAuthorizationManager` is new because `StudentInstructorAuthorizationManager` also guards a student's detailed peer evaluation results, private comments included, so widening it to admit the course admin would widen that route too. `ActiveAccountJwtAuthenticationConverter` is new because Spring's `JwtAuthenticationConverter.convert` is final; it wraps the existing converter bean and is wired in explicitly through `.jwt(jwt -> jwt.jwtAuthenticationConverter(...))`.
 
-- Backend: [`StudentController`](../../backend/src/main/java/team/projectpulse/student/StudentController.java), [`StudentService`](../../backend/src/main/java/team/projectpulse/student/StudentService.java), [`StudentSecurityService`](../../backend/src/main/java/team/projectpulse/student/StudentSecurityService.java), [`StudentInstructorAuthorizationManager`](../../backend/src/main/java/team/projectpulse/security/authorizationmanagers/StudentInstructorAuthorizationManager.java), [`SecurityConfiguration`](../../backend/src/main/java/team/projectpulse/security/SecurityConfiguration.java), [`UserRepository`](../../backend/src/main/java/team/projectpulse/user/UserRepository.java), [`EvaluationService`](../../backend/src/main/java/team/projectpulse/evaluation/EvaluationService.java).
+- Backend: [`StudentController`](../../backend/src/main/java/team/projectpulse/student/StudentController.java), [`StudentService`](../../backend/src/main/java/team/projectpulse/student/StudentService.java), [`StudentSecurityService`](../../backend/src/main/java/team/projectpulse/student/StudentSecurityService.java), [`StudentInstructorAuthorizationManager`](../../backend/src/main/java/team/projectpulse/security/authorizationmanagers/StudentInstructorAuthorizationManager.java), [`StudentCourseAdminAuthorizationManager`](../../backend/src/main/java/team/projectpulse/security/authorizationmanagers/StudentCourseAdminAuthorizationManager.java), [`ActiveAccountJwtAuthenticationConverter`](../../backend/src/main/java/team/projectpulse/security/ActiveAccountJwtAuthenticationConverter.java), [`StudentAlreadyDeactivatedException`](../../backend/src/main/java/team/projectpulse/system/exception/StudentAlreadyDeactivatedException.java), [`SecurityConfiguration`](../../backend/src/main/java/team/projectpulse/security/SecurityConfiguration.java), [`UserRepository`](../../backend/src/main/java/team/projectpulse/user/UserRepository.java), [`EvaluationService`](../../backend/src/main/java/team/projectpulse/evaluation/EvaluationService.java).
 - Frontend: [`Students.vue`](../../frontend/src/pages/students/Students.vue) (Deactivate control + confirmation), [`apis/student`](../../frontend/src/apis/student/index.ts) (`deactivateStudent`), [`SubmitTeamsEvaluations.vue`](../../frontend/src/pages/evaluations/SubmitTeamsEvaluations.vue) (lists only active teammates).
 
 ## Sequence
@@ -100,8 +111,8 @@ sequenceDiagram
     participant F as JWT authentication converter
     participant U as UserRepository
     St->>F: any protected request with her unexpired JWT
-    F->>U: findById(userId claim)
-    U-->>F: enabled = false
+    F->>U: existsByIdAndEnabledTrue(userId claim)
+    U-->>F: false
     F-->>St: 401; the SPA clears the token and redirects to login
     St->>F: log in again (HTTP Basic)
     F-->>St: 401 (MyUserPrincipal.isEnabled is false; existing behavior)
@@ -120,8 +131,8 @@ sequenceDiagram
 - **A dedicated `PATCH /students/{studentId}/deactivate`, not the edit form's `PUT`.** `PUT` rewrites every field under one rule, so it can't carry this use case's authorization, its extension 3a, or a test tagged to it. *Rejected:* keep using `PUT` with `enabled` false. `PUT`'s `enabled` toggle stays in place for now because UC-STU-reactivate-student still depends on it; it should be removed when reactivation gets its own endpoint (open question 1).
 - **Already deactivated is a conflict (409), not a no-op.** A new exception mapped in `ExceptionHandlerAdvice` to HTTP 409 and `StatusCode.CONFLICT`; the SPA's shared error handling shows its message as a toast (extension 3a2). *Rejected:* returning success unchanged, which would hide a stale page from the instructor.
 - **Unknown student id answers 403, the same as unauthorized (extension 6a).** Every authorization manager here fails closed before the controller, so a caller cannot probe which student ids exist (FR-SEC-deny-unauthorized). The use case's 6a is worded to match. *Rejected:* a 404 "student not found", which would tell any instructor which ids exist in other course sections.
-- **Immediate cutoff through the JWT authentication converter.** After the token's signature and expiry are checked, the converter loads the account named by the `userId` claim from `UserRepository` and, if it is deactivated or no longer exists, throws `DisabledException`. Being an `AuthenticationException`, it goes to the bearer-token entry point and becomes a 401, which the SPA already handles by clearing the token and redirecting to login. The check covers every `PeerEvaluationUser`, so it also covers deactivated instructors (the instructor half of FR-SEC-active-account) at no extra cost. A request to a `permitAll` route that carries a stale token also gets 401; the SPA then logs in afresh. Authentication stays stateless (no session, no shared token state). *Rejected:* a token denylist, which adds shared state that every instance must see and so cuts against KD-self-issued-jwt's stateless model; and a shorter token lifetime, which still leaves a window and logs everyone out more often. *Cost:* one primary-key read per request.
-- **Who may: an instructor of the student's course section, or the course admin of its course.** This is a new `StudentSecurityService` check beside `isCurrentUserInstructorOfStudentSection`, failing closed like every check there. It passes when the caller's id is among `student.section.instructors`, which is a set, so an instructor assigned to several course sections is handled; or when the caller is `student.section.course.courseAdmin`. It compares ids from the JWT's `userId` claim, never the caller's default course section. *Rejected:* `hasAuthority("ROLE_instructor")`, which would let an instructor of any course section deactivate the student, contradicting BR-section-scoped-access; and `UserOwnershipAuthorizationManager`, which would let a student deactivate herself.
+- **Immediate cutoff through the JWT authentication converter.** After the token's signature and expiry are checked, the converter asks `UserRepository.existsByIdAndEnabledTrue` whether the account named by the `userId` claim exists and is active (an existence query, so no entity or eager association is loaded) and, if it is deactivated or no longer exists, throws `DisabledException`. Being an `AuthenticationException`, it goes to the bearer-token entry point and becomes a 401, which the SPA already handles by clearing the token and redirecting to login. The check covers every `PeerEvaluationUser`, so it also covers deactivated instructors (the instructor half of FR-SEC-active-account) at no extra cost. A request to a `permitAll` route that carries a stale token also gets 401; the SPA then logs in afresh. Authentication stays stateless (no session, no shared token state). *Rejected:* a token denylist, which adds shared state that every instance must see and so cuts against KD-self-issued-jwt's stateless model; and a shorter token lifetime, which still leaves a window and logs everyone out more often. *Cost:* one existence query by primary key per request.
+- **Who may: an instructor of the student's course section, or the course admin of its course.** The route rule is `AuthorizationManagers.anyOf(StudentInstructorAuthorizationManager, StudentCourseAdminAuthorizationManager)`, the same composition the reminders route uses. The first reuses `isCurrentUserInstructorOfStudentSection`, which passes when the caller's id is among `student.section.instructors`, a set, so an instructor assigned to several course sections is handled. The second is a new `StudentSecurityService.isCurrentUserCourseAdminOfStudentCourse`, which passes when the caller is `student.section.course.courseAdmin`. Both fail closed like every check there. *Rejected:* one combined check, which would restate the instructor check. It compares ids from the JWT's `userId` claim, never the caller's default course section. *Rejected:* `hasAuthority("ROLE_instructor")`, which would let an instructor of any course section deactivate the student, contradicting BR-section-scoped-access; and `UserOwnershipAuthorizationManager`, which would let a student deactivate herself.
 - **The student stays on her team.** Deactivation changes only `enabled`. *Rejected:* removing her from the team, which would make reactivation lossy and detach her from her team's work.
 - **Peer evaluations: hide her in the form and guard on the server.** `SubmitTeamsEvaluations.vue` lists only teammates whose `StudentDto.enabled` is true, and `EvaluationService` rejects a deactivated evaluatee, per BR-submission-owed, both for a new peer evaluation and for an edit of one already submitted. Evaluations already stored are kept and still count in reports. *Rejected:* filtering `GET /students/teams/{teamId}`, because instructor team views read the same endpoint and must still show her.
 - **The control is a Deactivate button in the Operations column of `Students.vue`**, beside Edit, shown only while the row's `enabled` is true (extension 3a1) and shown to every instructor; the server enforces 3b. *Rejected:* hiding it per caller, which would duplicate the authorization rule in the browser.
@@ -133,7 +144,7 @@ No change. `enabled` already exists on `PeerEvaluationUser`, the superclass of `
 
 ## Reuse & cross-cutting
 
-- **Authentication & RBAC** (`security`): a new route rule, a new ownership check in the existing `StudentInstructorAuthorizationManager` style, and the active-account check in the JWT converter.
+- **Authentication & RBAC** (`security`): a new route rule, a new course-admin check and manager in the existing `StudentInstructorAuthorizationManager` style, and the active-account check in `ActiveAccountJwtAuthenticationConverter`.
 - **Login**: `MyUserPrincipal.isEnabled` already blocks a deactivated account from logging in.
 - **Submission status** (`notification/SubmissionStatusService`): already counts only active students (BR-submission-owed); unchanged.
 - **Client error handling** (`frontend/src/utils/request.ts`): a 401 already clears the session and redirects to login, which completes the cutoff on the SPA side.
@@ -150,7 +161,8 @@ No change. `enabled` already exists on `PeerEvaluationUser`, the superclass of `
 | 3b: the course admin of a different course | integration | 403; student unchanged |
 | 3b: an instructor of a different course section | integration | 403; student unchanged |
 | 3b: a student calls the endpoint, including on herself | integration | 403; student unchanged |
-| 5a: the course admin or instructor cancels | manual (frontend) | no request is sent; student unchanged |
+| 5a: the course admin or instructor cancels | Cypress, API stubbed (`deactivatestudent.spec.cy.js`) | no request is sent; student unchanged |
+| 3a1, 4, 6, 3a2 on the page | Cypress, API stubbed | Deactivate offered only for an active student; the dialog states the consequences; confirm alerts and reloads the row; a 409 shows its message |
 | 6a: unknown `studentId` | integration | 403, not 500 |
 | FR-SEC-active-account: a deactivated student's unexpired JWT | integration | her next protected request returns 401 |
 | FR-SEC-active-account: a deactivated student logs in | integration | 401 |

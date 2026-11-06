@@ -39,7 +39,7 @@
           <el-tag type="danger" v-else>Disabled</el-tag>
         </template>
       </el-table-column>
-      <el-table-column label="Operations" width="120">
+      <el-table-column label="Operations" width="200">
         <template #default="{ row }">
           <el-button
             icon="Edit"
@@ -48,6 +48,16 @@
             type="primary"
             @click.stop="showEditStudentDialog(row)"
           ></el-button>
+          <!-- UC-STU-deactivate-student: offered only while the student is active (ext. 3a1) -->
+          <el-button
+            v-if="row.enabled"
+            plain
+            type="danger"
+            size="small"
+            data-cy="deactivate-student"
+            @click.stop="confirmDeactivateStudent(row)"
+            >Deactivate</el-button
+          >
         </template>
       </el-table-column>
       <template #empty>
@@ -78,7 +88,7 @@
 
 <script setup lang="ts">
 import { onMounted, ref } from 'vue'
-import { searchStudents } from '@/apis/student'
+import { deactivateStudent, searchStudents } from '@/apis/student'
 import type {
   SearchStudentByCriteriaResponse,
   Student,
@@ -86,7 +96,7 @@ import type {
 } from '@/apis/student/types'
 import { useSettingsStore } from '@/stores/settings'
 import EditStudentForm from './EditStudentForm.vue'
-import { ElMessage } from 'element-plus'
+import { ElMessage, ElMessageBox } from 'element-plus'
 
 const searchCriteria = ref<StudentSearchCriteria>({
   sectionId: NaN,
@@ -162,6 +172,32 @@ function showEditStudentDialog(student: Student) {
 function closeDialog() {
   dialogVisible.value = false
   loadStudents()
+}
+
+// UC-STU-deactivate-student, steps 4-6: warn about the consequences, ask for confirmation, then deactivate
+async function confirmDeactivateStudent(student: Student) {
+  const name = `${student.firstName} ${student.lastName}`
+  try {
+    await ElMessageBox.confirm(
+      `Deactivate ${name}? They will lose access immediately and can no longer log in or submit weekly activity reports and peer evaluations. Their account, team, and submitted work are kept, and you can reactivate them later. This is not a deletion.`,
+      'Deactivate student',
+      {
+        confirmButtonText: 'Deactivate',
+        cancelButtonText: 'Cancel',
+        type: 'warning'
+      }
+    )
+  } catch {
+    return // 5a: canceled, nothing is sent and the student is unchanged
+  }
+  try {
+    await deactivateStudent(student.id as number)
+    ElMessage.success(`${name} has been deactivated.`)
+  } catch {
+    // The shared request handler already shows the server's message (e.g. 3a2: already deactivated)
+  } finally {
+    loadStudents() // Reload the row so its status and the Deactivate button reflect the server
+  }
 }
 
 import { useRouter } from 'vue-router'

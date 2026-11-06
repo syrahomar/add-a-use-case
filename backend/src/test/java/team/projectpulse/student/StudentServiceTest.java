@@ -5,6 +5,8 @@ import team.projectpulse.instructor.Instructor;
 import team.projectpulse.section.Section;
 import team.projectpulse.section.SectionRepository;
 import team.projectpulse.system.UserUtils;
+import team.projectpulse.system.exception.StudentAlreadyDeactivatedException;
+import team.projectpulse.team.Team;
 import team.projectpulse.user.MyUserPrincipal;
 import team.projectpulse.user.userinvitation.UserInvitationService;
 import org.junit.jupiter.api.BeforeEach;
@@ -28,6 +30,7 @@ import java.util.Map;
 import java.util.Optional;
 
 import static org.assertj.core.api.Assertions.assertThat;
+import static org.assertj.core.api.Assertions.catchThrowable;
 import static org.mockito.ArgumentMatchers.any;
 import static org.mockito.BDDMockito.given;
 import static org.mockito.Mockito.*;
@@ -188,6 +191,46 @@ class StudentServiceTest {
 
         // Then
         verify(this.studentRepository, times(1)).deleteById(1);
+    }
+
+    @Test
+    void testDeactivateStudentChangesOnlyEnabled() {
+        // Given: UC-STU-deactivate-student main flow
+        Student john = this.students.get(0);
+        john.setId(1);
+        Team team1 = new Team("Team1", "Team 1 description", "https://www.team1.com");
+        team1.addStudent(john);
+        given(this.studentRepository.findById(1)).willReturn(Optional.of(john));
+        given(this.studentRepository.save(john)).willReturn(john);
+
+        // When
+        Student deactivated = this.studentService.deactivateStudent(1);
+
+        // Then
+        assertThat(deactivated.isEnabled()).isFalse();
+        assertThat(deactivated.getTeam()).isSameAs(team1); // She stays on her team
+        assertThat(deactivated.getFirstName()).isEqualTo("John");
+        assertThat(deactivated.getEmail()).isEqualTo("j.smith@abc.edu");
+        assertThat(deactivated.getRoles()).isEqualTo("student");
+        verify(this.studentRepository, times(1)).save(john);
+    }
+
+    @Test
+    void testDeactivateStudentAlreadyDeactivated() {
+        // Given: extension 3a2
+        Student john = this.students.get(0);
+        john.setId(1);
+        john.setEnabled(false);
+        given(this.studentRepository.findById(1)).willReturn(Optional.of(john));
+
+        // When
+        Throwable throwable = catchThrowable(() -> this.studentService.deactivateStudent(1));
+
+        // Then
+        assertThat(throwable)
+                .isInstanceOf(StudentAlreadyDeactivatedException.class)
+                .hasMessage("The student is already deactivated.");
+        verify(this.studentRepository, never()).save(any(Student.class));
     }
 
 }

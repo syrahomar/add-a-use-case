@@ -197,6 +197,12 @@ public class ExceptionHandlerAdvice {
         return new Result(false, StatusCode.CONFLICT, ex.getMessage());
     }
 
+    @ExceptionHandler(StudentAlreadyDeactivatedException.class)
+    @ResponseStatus(HttpStatus.CONFLICT)
+    Result handleStudentAlreadyDeactivatedException(StudentAlreadyDeactivatedException ex) {
+        return new Result(false, StatusCode.CONFLICT, ex.getMessage());
+    }
+
     @ExceptionHandler({ObjectOptimisticLockingFailureException.class, OptimisticLockException.class})
     @ResponseStatus(HttpStatus.CONFLICT)
     Result handleOptimisticLock(RuntimeException ex) {
