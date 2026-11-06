@@ -1481,7 +1481,7 @@ Details:
 - **5a. The course admin or instructor cancels the deactivation:**
   - 5a1. The system leaves the student unchanged and the use case ends.
 - **6a. The student no longer exists:**
-  - 6a1. The system alerts the course admin or instructor that the student was not found, and the use case ends.
+  - 6a1. The system denies the request without revealing whether the student exists (FR-SEC-deny-unauthorized), and the use case ends.
 
 **Priority:** Low
 **Frequency of Use:** Rare. Occurs occasionally when a student withdraws from a course section.
