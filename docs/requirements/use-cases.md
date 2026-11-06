@@ -1473,12 +1473,24 @@ Details:
 7. Use case ends.
 
 **Extensions:**
+- **3a. The student is already deactivated:**
+  - 3a1. The system does not offer deactivation for this student; the course admin or instructor may instead choose UC-STU-reactivate-student: Reactivate a student, or terminate the use case.
+  - 3a2. If a deactivation request reaches the system anyway, the system rejects it, alerts the course admin or instructor that the student is already deactivated, and leaves the student unchanged.
+- **3b. The course admin or instructor is not authorized to deactivate this student:**
+  - 3b1. The system denies the request (FR-SEC-deny-unauthorized), leaves the student unchanged, and the use case ends.
+- **5a. The course admin or instructor cancels the deactivation:**
+  - 5a1. The system leaves the student unchanged and the use case ends.
+- **6a. The student no longer exists:**
+  - 6a1. The system denies the request without revealing whether the student exists (FR-SEC-deny-unauthorized), and the use case ends.
+
 **Priority:** Low
 **Frequency of Use:** Rare. Occurs occasionally when a student withdraws from a course section.
-**Business Rules:** BR-student-lifecycle
+**Business Rules:** BR-student-lifecycle, BR-section-scoped-access, BR-submission-owed
 
 **Associated Information:**
 - Consequence of the deactivation: The student will no longer be able to log in or submit weekly activity reports and peer evaluations, but the student's account and her previously submitted work are kept in the system. Deactivation will NOT remove the student from the system, and the account can be reactivated in the future (UC-STU-reactivate-student: Reactivate a student). This is distinct from deletion (UC-STU-delete-student: Delete a student), which is a physical, unrecoverable delete. The course admin or instructor shall be able to cancel the use case at any time prior to submitting it.
+- Effect on a student who is logged in when she is deactivated: she loses access at her next request, without waiting for her login to expire (FR-SEC-active-account).
+- Effect on her team: she stays a member of her team, so her team's work and her place on it are restored on reactivation. Because only active teammates are owed a peer evaluation (BR-submission-owed), her teammates are no longer offered her in new peer evaluations; peer evaluations already submitted for or by her are kept.
 
 **Related Use Cases:** UC-STU-delete-student: Delete a student; UC-STU-reactivate-student: Reactivate a student
 **Assumptions:**
