@@ -4,7 +4,6 @@ import org.springframework.core.convert.converter.Converter;
 import org.springframework.security.authentication.AbstractAuthenticationToken;
 import org.springframework.security.authentication.DisabledException;
 import org.springframework.security.oauth2.jwt.Jwt;
-import team.projectpulse.user.PeerEvaluationUser;
 import team.projectpulse.user.UserRepository;
 
 /**
@@ -18,7 +17,7 @@ import team.projectpulse.user.UserRepository;
  * to the bearer-token entry point and becomes a 401, which the SPA answers by clearing the token and returning
  * to the login page. Authentication stays stateless: no token denylist, no session.
  *
- * <p>Cost: one primary-key read per authenticated request.
+ * <p>Cost: one existence query by primary key per authenticated request; no entity is loaded.
  */
 public class ActiveAccountJwtAuthenticationConverter implements Converter<Jwt, AbstractAuthenticationToken> {
 
@@ -35,9 +34,7 @@ public class ActiveAccountJwtAuthenticationConverter implements Converter<Jwt, A
     @Override
     public AbstractAuthenticationToken convert(Jwt jwt) {
         Integer userId = readUserId(jwt);
-        boolean active = userId != null && this.userRepository.findById(userId)
-                .map(PeerEvaluationUser::isEnabled)
-                .orElse(false);
+        boolean active = userId != null && this.userRepository.existsByIdAndEnabledTrue(userId);
         if (!active) {
             throw new DisabledException("The account is deactivated or no longer exists.");
         }
